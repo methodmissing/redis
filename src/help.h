@@ -632,7 +632,22 @@ struct commandHelp {
     "destination numkeys key [key ...] [WEIGHTS weight] [AGGREGATE SUM|MIN|MAX]",
     "Add multiple sorted sets and store the resulting sorted set in a new key",
     4,
-    "1.3.10" }
+    "1.3.10" },
+    { "RECYCLE",
+    "channel",
+    "Define a Dead Letter Channel to publish expired keys to",
+    6,
+    "0.1" },
+    { "RECYCLETO",
+    "-",
+    "Return the Dead Letter Channel expired keys is published to",
+    6,
+    "0.1" },
+    { "DISPOSE",
+    "-",
+    "Remove a registered Dead Letter Channel and stop broadcasting key expiry",
+    6,
+    "0.1" }
 };
 
 #endif

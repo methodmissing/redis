@@ -514,7 +514,8 @@ void propagateExpire(redisDb *db, robj *key) {
     argv[0] = createStringObject("DEL",3);
     argv[1] = key;
     incrRefCount(key);
-
+    if (db->expire_channel)
+        pubsubPublishMessage(db->expire_channel,key);
     if (server.appendonly)
         feedAppendOnlyFile(server.delCommand,db->id,argv,2);
     if (listLength(server.slaves))
@@ -613,5 +614,29 @@ void persistCommand(redisClient *c) {
         } else {
             addReply(c,shared.czero);
         }
+    }
+}
+
+void recycleCommand(redisClient *c) {
+    c->db->expire_channel = c->argv[1];
+    subscribeCommand(c);
+}
+
+void recycletoCommand(redisClient *c) {
+    if (c->db->expire_channel == NULL) {
+        addReply(c,shared.ok);
+    } else {
+        addReply(c,c->db->expire_channel);
+    }
+}
+
+void disposeCommand(redisClient *c) {
+    if (c->db->expire_channel == NULL) {
+        addReply(c,shared.err);
+    } else {
+        c->argc = 1;
+        c->argv[1] = c->db->expire_channel;
+        c->db->expire_channel = NULL;
+        unsubscribeCommand(c);
     }
 }

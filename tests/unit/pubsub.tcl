@@ -192,4 +192,30 @@ start_server {tags {"pubsub"}} {
         # clean up clients
         $rd1 close
     }
+
+    test "RECYCLE on expire" {
+        # Set keys with a TTL and recycle them to a dead letter channel
+        assert_equal "OK" [r set x foo]
+        assert_equal "OK" [r set y bar]
+        assert_equal 1 [r expire x 1]
+        assert_equal 1 [r expire y 2]
+        assert_equal "subscribe expired 1" [r recycle expired]
+
+        after 3000
+        assert_equal {message expired x} [r read]
+        assert_equal {message expired y} [r read]
+    }
+
+    test "DISPOSE with a dead letter channel set" {
+        assert_equal "unsubscribe expired 0" [r dispose]
+    }
+
+    test "DISPOSE without a dead letter channel set" {
+        catch {r dispose} err
+        set _ $err
+    } {ERR}
+
+    test {RECYCLETO without a dead letter channel set} {
+        r recycleto
+    } {OK}
 }

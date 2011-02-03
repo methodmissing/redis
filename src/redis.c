@@ -187,7 +187,10 @@ struct redisCommand readonlyCommandTable[] = {
     {"punsubscribe",punsubscribeCommand,-1,0,NULL,0,0,0},
     {"publish",publishCommand,3,REDIS_CMD_FORCE_REPLICATION,NULL,0,0,0},
     {"watch",watchCommand,-2,0,NULL,0,0,0},
-    {"unwatch",unwatchCommand,1,0,NULL,0,0,0}
+    {"unwatch",unwatchCommand,1,0,NULL,0,0,0},
+    {"recycle",recycleCommand,2,0,NULL,1,1,1},
+    {"recycleto",recycletoCommand,1,0,NULL,0,0,0},
+    {"dispose",disposeCommand,1,0,NULL,0,0,0}
 };
 
 /*============================ Utility functions ============================ */
@@ -874,6 +877,7 @@ void initServer() {
         server.db[j].expires = dictCreate(&keyptrDictType,NULL);
         server.db[j].blocking_keys = dictCreate(&keylistDictType,NULL);
         server.db[j].watched_keys = dictCreate(&keylistDictType,NULL);
+        server.db[j].expire_channel = NULL;
         if (server.ds_enabled) {
             server.db[j].io_keys = dictCreate(&keylistDictType,NULL);
             server.db[j].io_negcache = dictCreate(&setDictType,NULL);
@@ -1026,8 +1030,9 @@ int processCommand(redisClient *c) {
     if ((dictSize(c->pubsub_channels) > 0 || listLength(c->pubsub_patterns) > 0)
         &&
         cmd->proc != subscribeCommand && cmd->proc != unsubscribeCommand &&
-        cmd->proc != psubscribeCommand && cmd->proc != punsubscribeCommand) {
-        addReplyError(c,"only (P)SUBSCRIBE / (P)UNSUBSCRIBE / QUIT allowed in this context");
+        cmd->proc != psubscribeCommand && cmd->proc != punsubscribeCommand &&
+        cmd->proc != disposeCommand) {
+        addReplyError(c,"only (P)SUBSCRIBE / (P)UNSUBSCRIBE / QUIT / DISPOSE allowed in this context");
         return REDIS_OK;
     }
 

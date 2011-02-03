@@ -279,6 +279,7 @@ typedef struct redisDb {
     dict *io_negcache;          /* Negative caching for disk store */
     dict *io_queued;            /* Queued IO operations hash table */
     dict *watched_keys;         /* WATCHED keys for MULTI/EXEC CAS */
+    robj *expire_channel;       /* Dead Letter Channel for expired keys */
     int id;
 } redisDb;
 
@@ -871,6 +872,7 @@ int pubsubUnsubscribeAllChannels(redisClient *c, int notify);
 int pubsubUnsubscribeAllPatterns(redisClient *c, int notify);
 void freePubsubPattern(void *p);
 int listMatchPubsubPattern(void *a, void *b);
+int pubsubPublishMessage(robj *channel, robj *message);
 
 /* Utility functions */
 int stringmatchlen(const char *pattern, int patternLen,
@@ -1030,6 +1032,9 @@ void punsubscribeCommand(redisClient *c);
 void publishCommand(redisClient *c);
 void watchCommand(redisClient *c);
 void unwatchCommand(redisClient *c);
+void recycleCommand(redisClient *c);
+void recycletoCommand(redisClient *c);
+void disposeCommand(redisClient *c);
 
 #if defined(__GNUC__)
 void *calloc(size_t count, size_t size) __attribute__ ((deprecated));
