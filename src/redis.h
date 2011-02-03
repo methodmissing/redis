@@ -518,6 +518,7 @@ struct redisCommand {
     int vm_firstkey; /* The first argument that's a key (0 = no keys) */
     int vm_lastkey;  /* THe last argument that's a key */
     int vm_keystep;  /* The step between first and last key */
+    long long microseconds, calls;
 };
 
 struct redisFunctionSym {
@@ -800,6 +801,7 @@ void updateDictResizePolicy(void);
 int htNeedsResize(dict *dict);
 void oom(const char *msg);
 void populateCommandTable(void);
+void resetCommandTableStats(void);
 
 /* Disk store */
 int dsOpen(void);
