@@ -212,7 +212,7 @@ int cacheFreeOneEntry(void) {
         }
     }
     if (best == NULL) {
-        /* Was not able to fix a single object... we should check if our
+        /* Not able to free a single object? we should check if our
          * IO queues have stuff in queue, and try to consume the queue
          * otherwise we'll use an infinite amount of memory if changes to
          * the dataset are faster than I/O */
@@ -238,13 +238,6 @@ int cacheFreeOneEntry(void) {
         decrRefCount(kobj);
     }
     return REDIS_OK;
-}
-
-/* Return true if it's safe to swap out objects in a given moment.
- * Basically we don't want to swap objects out while there is a BGSAVE
- * or a BGAEOREWRITE running in backgroud. */
-int dsCanTouchDiskStore(void) {
-    return (server.bgsavechildpid == -1 && server.bgrewritechildpid == -1);
 }
 
 /* ==================== Disk store negative caching  ========================
@@ -323,7 +316,14 @@ void freeIOJob(iojob *j) {
 
 /* Every time a thread finished a Job, it writes a byte into the write side
  * of an unix pipe in order to "awake" the main thread, and this function
- * is called. */
+ * is called.
+ *
+ * If privdata == NULL the function will try to put more jobs in the queue
+ * of IO jobs to process as more room is made. privdata is equal to NULL
+ * when the function is called from the event loop, so we want to push
+ * more IO jobs in the queue. Instead when the function is called by
+ * other functions that want to create a write-barrier to avoid race 
+ * conditions we don't push new jobs in the queue. */
 void vmThreadedIOCompletedJob(aeEventLoop *el, int fd, void *privdata,
             int mask)
 {
@@ -331,7 +331,6 @@ void vmThreadedIOCompletedJob(aeEventLoop *el, int fd, void *privdata,
     int retval, processed = 0, toprocess = -1;
     REDIS_NOTUSED(el);
     REDIS_NOTUSED(mask);
-    REDIS_NOTUSED(privdata);
 
     /* For every byte we read in the read side of the pipe, there is one
      * I/O job completed to process. */
@@ -384,12 +383,12 @@ void vmThreadedIOCompletedJob(aeEventLoop *el, int fd, void *privdata,
             }
             cacheScheduleIODelFlag(j->db,j->key,REDIS_IO_LOADINPROG);
             handleClientsBlockedOnSwappedKey(j->db,j->key);
-            freeIOJob(j);
         } else if (j->type == REDIS_IOJOB_SAVE) {
             cacheScheduleIODelFlag(j->db,j->key,REDIS_IO_SAVEINPROG);
-            freeIOJob(j);
         }
+        freeIOJob(j);
         processed++;
+        if (privdata == NULL) cacheScheduleIOPushJobs(0);
         if (processed == toprocess) return;
     }
     if (retval < 0 && errno != EAGAIN) {
@@ -411,6 +410,7 @@ void *IOThreadEntryPoint(void *arg) {
     iojob *j;
     listNode *ln;
     REDIS_NOTUSED(arg);
+    long long start;
 
     pthread_detach(pthread_self());
     lockThreadedIO();
@@ -418,10 +418,13 @@ void *IOThreadEntryPoint(void *arg) {
         /* Get a new job to process */
         if (listLength(server.io_newjobs) == 0) {
             /* Wait for more work to do */
+            redisLog(REDIS_DEBUG,"[T] wait for signal");
             pthread_cond_wait(&server.io_condvar,&server.io_mutex);
+            redisLog(REDIS_DEBUG,"[T] signal received");
             continue;
         }
-        redisLog(REDIS_DEBUG,"%ld IO jobs to process",
+        start = ustime();
+        redisLog(REDIS_DEBUG,"[T] %ld IO jobs to process",
             listLength(server.io_newjobs));
         ln = listFirst(server.io_newjobs);
         j = ln->value;
@@ -431,7 +434,7 @@ void *IOThreadEntryPoint(void *arg) {
         ln = listLast(server.io_processing); /* We use ln later to remove it */
         unlockThreadedIO();
 
-        redisLog(REDIS_DEBUG,"Thread %ld: new job type %s: %p about key '%s'",
+        redisLog(REDIS_DEBUG,"[T] %ld: new job type %s: %p about key '%s'",
             (long) pthread_self(),
             (j->type == REDIS_IOJOB_LOAD) ? "load" : "save",
             (void*)j, (char*)j->key->ptr);
@@ -444,22 +447,25 @@ void *IOThreadEntryPoint(void *arg) {
             if (j->val) j->expire = expire;
         } else if (j->type == REDIS_IOJOB_SAVE) {
             if (j->val) {
-                dsSet(j->db,j->key,j->val);
+                dsSet(j->db,j->key,j->val,j->expire);
             } else {
                 dsDel(j->db,j->key);
             }
         }
 
         /* Done: insert the job into the processed queue */
-        redisLog(REDIS_DEBUG,"Thread %ld completed the job: %p (key %s)",
+        redisLog(REDIS_DEBUG,"[T] %ld completed the job: %p (key %s)",
             (long) pthread_self(), (void*)j, (char*)j->key->ptr);
 
+        redisLog(REDIS_DEBUG,"[T] lock IO");
         lockThreadedIO();
+        redisLog(REDIS_DEBUG,"[T] IO locked");
         listDelNode(server.io_processing,ln);
         listAddNodeTail(server.io_processed,j);
 
         /* Signal the main thread there is new stuff to process */
         redisAssert(write(server.io_ready_pipe_write,"x",1) == 1);
+        redisLog(REDIS_DEBUG,"TIME (%c): %lld\n", j->type == REDIS_IOJOB_LOAD ? 'L' : 'S', ustime()-start);
     }
     /* never reached, but that's the full pattern... */
     unlockThreadedIO();
@@ -501,30 +507,39 @@ int processActiveIOJobs(int max) {
     while(max == -1 || max > 0) {
         int io_processed_len;
 
+        redisLog(REDIS_DEBUG,"[P] lock IO");
         lockThreadedIO();
+        redisLog(REDIS_DEBUG,"Waiting IO jobs processing: new:%d proessing:%d processed:%d",listLength(server.io_newjobs),listLength(server.io_processing),listLength(server.io_processed));
+
         if (listLength(server.io_newjobs) == 0 &&
             listLength(server.io_processing) == 0)
         {
             /* There is nothing more to process */
+            redisLog(REDIS_DEBUG,"[P] Nothing to process, unlock IO, return");
             unlockThreadedIO();
             break;
         }
 
-#if 0
+#if 1
         /* If there are new jobs we need to signal the thread to
          * process the next one. FIXME: drop this if useless. */
-        redisLog(REDIS_DEBUG,"waitEmptyIOJobsQueue: new %d, processing %d",
+        redisLog(REDIS_DEBUG,"[P] waitEmptyIOJobsQueue: new %d, processing %d, processed %d",
             listLength(server.io_newjobs),
-            listLength(server.io_processing));
+            listLength(server.io_processing),
+            listLength(server.io_processed));
 
         if (listLength(server.io_newjobs)) {
+            redisLog(REDIS_DEBUG,"[P] There are new jobs, signal");
             pthread_cond_signal(&server.io_condvar);
         }
 #endif
 
         /* Check if we can process some finished job */
         io_processed_len = listLength(server.io_processed);
+        redisLog(REDIS_DEBUG,"[P] Unblock IO");
         unlockThreadedIO();
+        redisLog(REDIS_DEBUG,"[P] Wait");
+        usleep(10000);
         if (io_processed_len) {
             vmThreadedIOCompletedJob(NULL,server.io_ready_pipe_read,
                                                         (void*)0xdeadbeef,0);
@@ -572,8 +587,6 @@ void queueIOJob(iojob *j) {
     redisLog(REDIS_DEBUG,"Queued IO Job %p type %d about key '%s'\n",
         (void*)j, j->type, (char*)j->key->ptr);
     listAddNodeTail(server.io_newjobs,j);
-    if (server.io_active_threads < server.vm_max_threads)
-        spawnIOThread();
 }
 
 /* Consume all the IO scheduled operations, and all the thread IO jobs
@@ -590,7 +603,7 @@ void cacheForcePointInTime(void) {
     processAllPendingIOJobs();
 }
 
-void cacheCreateIOJob(int type, redisDb *db, robj *key, robj *val) {
+void cacheCreateIOJob(int type, redisDb *db, robj *key, robj *val, time_t expire) {
     iojob *j;
 
     j = zmalloc(sizeof(*j));
@@ -600,6 +613,7 @@ void cacheCreateIOJob(int type, redisDb *db, robj *key, robj *val) {
     incrRefCount(key);
     j->val = val;
     if (val) incrRefCount(val);
+    j->expire = expire;
 
     lockThreadedIO();
     queueIOJob(j);
@@ -725,7 +739,7 @@ void cacheScheduleIO(redisDb *db, robj *key, int type) {
  * scheduled completion time, but just do the operation ASAP. This is useful
  * when we need to reclaim memory from the IO queue.
  */
-#define MAX_IO_JOBS_QUEUE 100
+#define MAX_IO_JOBS_QUEUE 10
 int cacheScheduleIOPushJobs(int flags) {
     time_t now = time(NULL);
     listNode *ln;
@@ -780,20 +794,23 @@ int cacheScheduleIOPushJobs(int flags) {
             op->type == REDIS_IO_LOAD ? "load" : "save", op->key->ptr);
 
         if (op->type == REDIS_IO_LOAD) {
-            cacheCreateIOJob(REDIS_IOJOB_LOAD,op->db,op->key,NULL);
+            cacheCreateIOJob(REDIS_IOJOB_LOAD,op->db,op->key,NULL,0);
         } else {
+            time_t expire = -1;
+
             /* Lookup the key, in order to put the current value in the IO
              * Job. Otherwise if the key does not exists we schedule a disk
              * store delete operation, setting the value to NULL. */
             de = dictFind(op->db->dict,op->key->ptr);
             if (de) {
                 val = dictGetEntryVal(de);
+                expire = getExpire(op->db,op->key);
             } else {
                 /* Setting the value to NULL tells the IO thread to delete
                  * the key on disk. */
                 val = NULL;
             }
-            cacheCreateIOJob(REDIS_IOJOB_SAVE,op->db,op->key,val);
+            cacheCreateIOJob(REDIS_IOJOB_SAVE,op->db,op->key,val,expire);
         }
         /* Mark the operation as in progress. */
         cacheScheduleIODelFlag(op->db,op->key,op->type);
@@ -873,62 +890,17 @@ int waitForSwappedKey(redisClient *c, robj *key) {
     listAddNodeTail(l,c);
 
     /* Are we already loading the key from disk? If not create a job */
-    if (de == NULL)
-        cacheScheduleIO(c->db,key,REDIS_IO_LOAD);
+    if (de == NULL) {
+        int flags = cacheScheduleIOGetFlags(c->db,key);
+
+        /* It is possible that even if there are no clients waiting for
+         * a load operation, still we have a load operation in progress.
+         * For instance think to a client performing a GET and then
+         * closing the connection */
+        if ((flags & (REDIS_IO_LOAD|REDIS_IO_LOADINPROG)) == 0)
+            cacheScheduleIO(c->db,key,REDIS_IO_LOAD);
+    }
     return 1;
-}
-
-/* Preload keys for any command with first, last and step values for
- * the command keys prototype, as defined in the command table. */
-void waitForMultipleSwappedKeys(redisClient *c, struct redisCommand *cmd, int argc, robj **argv) {
-    int j, last;
-    if (cmd->vm_firstkey == 0) return;
-    last = cmd->vm_lastkey;
-    if (last < 0) last = argc+last;
-    for (j = cmd->vm_firstkey; j <= last; j += cmd->vm_keystep) {
-        redisAssert(j < argc);
-        waitForSwappedKey(c,argv[j]);
-    }
-}
-
-/* Preload keys needed for the ZUNIONSTORE and ZINTERSTORE commands.
- * Note that the number of keys to preload is user-defined, so we need to
- * apply a sanity check against argc. */
-void zunionInterBlockClientOnSwappedKeys(redisClient *c, struct redisCommand *cmd, int argc, robj **argv) {
-    int i, num;
-    REDIS_NOTUSED(cmd);
-
-    num = atoi(argv[2]->ptr);
-    if (num > (argc-3)) return;
-    for (i = 0; i < num; i++) {
-        waitForSwappedKey(c,argv[3+i]);
-    }
-}
-
-/* Preload keys needed to execute the entire MULTI/EXEC block.
- *
- * This function is called by blockClientOnSwappedKeys when EXEC is issued,
- * and will block the client when any command requires a swapped out value. */
-void execBlockClientOnSwappedKeys(redisClient *c, struct redisCommand *cmd, int argc, robj **argv) {
-    int i, margc;
-    struct redisCommand *mcmd;
-    robj **margv;
-    REDIS_NOTUSED(cmd);
-    REDIS_NOTUSED(argc);
-    REDIS_NOTUSED(argv);
-
-    if (!(c->flags & REDIS_MULTI)) return;
-    for (i = 0; i < c->mstate.count; i++) {
-        mcmd = c->mstate.commands[i].cmd;
-        margc = c->mstate.commands[i].argc;
-        margv = c->mstate.commands[i].argv;
-
-        if (mcmd->vm_preload_proc != NULL) {
-            mcmd->vm_preload_proc(c,mcmd,margc,margv);
-        } else {
-            waitForMultipleSwappedKeys(c,mcmd,margc,margv);
-        }
-    }
 }
 
 /* Is this client attempting to run a command against swapped keys?
@@ -942,10 +914,39 @@ void execBlockClientOnSwappedKeys(redisClient *c, struct redisCommand *cmd, int 
  * Return 1 if the client is marked as blocked, 0 if the client can
  * continue as the keys it is going to access appear to be in memory. */
 int blockClientOnSwappedKeys(redisClient *c, struct redisCommand *cmd) {
-    if (cmd->vm_preload_proc != NULL) {
-        cmd->vm_preload_proc(c,cmd,c->argc,c->argv);
+    int *keyindex, numkeys, j, i;
+
+    /* EXEC is a special case, we need to preload all the commands
+     * queued into the transaction */
+    if (cmd->proc == execCommand) {
+        struct redisCommand *mcmd;
+        robj **margv;
+        int margc;
+
+        if (!(c->flags & REDIS_MULTI)) return 0;
+        for (i = 0; i < c->mstate.count; i++) {
+            mcmd = c->mstate.commands[i].cmd;
+            margc = c->mstate.commands[i].argc;
+            margv = c->mstate.commands[i].argv;
+
+            keyindex = getKeysFromCommand(mcmd,margv,margc,&numkeys,
+                                          REDIS_GETKEYS_PRELOAD);
+            for (j = 0; j < numkeys; j++) {
+                redisLog(REDIS_DEBUG,"Preloading %s",
+                    (char*)margv[keyindex[j]]->ptr);
+                waitForSwappedKey(c,margv[keyindex[j]]);
+            }
+            getKeysFreeResult(keyindex);
+        }
     } else {
-        waitForMultipleSwappedKeys(c,cmd,c->argc,c->argv);
+        keyindex = getKeysFromCommand(cmd,c->argv,c->argc,&numkeys,
+                                      REDIS_GETKEYS_PRELOAD);
+        for (j = 0; j < numkeys; j++) {
+            redisLog(REDIS_DEBUG,"Preloading %s",
+                (char*)c->argv[keyindex[j]]->ptr);
+            waitForSwappedKey(c,c->argv[keyindex[j]]);
+        }
+        getKeysFreeResult(keyindex);
     }
 
     /* If the client was blocked for at least one key, mark it as blocked. */

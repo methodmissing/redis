@@ -70,12 +70,12 @@ struct redisServer server; /* server global state */
 struct redisCommand *commandTable;
 struct redisCommand redisCommandTable[] = {
     {"get",getCommand,2,0,NULL,1,1,1,0,0},
-    {"set",setCommand,3,REDIS_CMD_DENYOOM,NULL,0,0,0,0,0},
-    {"setnx",setnxCommand,3,REDIS_CMD_DENYOOM,NULL,0,0,0,0,0},
-    {"setex",setexCommand,4,REDIS_CMD_DENYOOM,NULL,0,0,0,0,0},
+    {"set",setCommand,3,REDIS_CMD_DENYOOM,noPreloadGetKeys,1,1,1,0,0},
+    {"setnx",setnxCommand,3,REDIS_CMD_DENYOOM,noPreloadGetKeys,1,1,1,0,0},
+    {"setex",setexCommand,4,REDIS_CMD_DENYOOM,noPreloadGetKeys,2,2,1,0,0},
     {"append",appendCommand,3,REDIS_CMD_DENYOOM,NULL,1,1,1,0,0},
     {"strlen",strlenCommand,2,0,NULL,1,1,1,0,0},
-    {"del",delCommand,-2,0,NULL,0,0,0,0,0},
+    {"del",delCommand,-2,0,noPreloadGetKeys,1,-1,1,0,0},
     {"exists",existsCommand,2,0,NULL,1,1,1,0,0},
     {"setbit",setbitCommand,4,REDIS_CMD_DENYOOM,NULL,1,1,1,0,0},
     {"getbit",getbitCommand,3,0,NULL,1,1,1,0,0},
@@ -94,7 +94,7 @@ struct redisCommand redisCommandTable[] = {
     {"lpop",lpopCommand,2,0,NULL,1,1,1,0,0},
     {"brpop",brpopCommand,-3,0,NULL,1,1,1,0,0},
     {"brpoplpush",brpoplpushCommand,4,REDIS_CMD_DENYOOM,NULL,1,2,1,0,0},
-    {"blpop",blpopCommand,-3,0,NULL,1,1,1,0,0},
+    {"blpop",blpopCommand,-3,0,NULL,1,-2,1,0,0},
     {"llen",llenCommand,2,0,NULL,1,1,1,0,0},
     {"lindex",lindexCommand,3,0,NULL,1,1,1,0,0},
     {"lset",lsetCommand,4,REDIS_CMD_DENYOOM,NULL,1,1,1,0,0},
@@ -121,8 +121,8 @@ struct redisCommand redisCommandTable[] = {
     {"zrem",zremCommand,3,0,NULL,1,1,1,0,0},
     {"zremrangebyscore",zremrangebyscoreCommand,4,0,NULL,1,1,1,0,0},
     {"zremrangebyrank",zremrangebyrankCommand,4,0,NULL,1,1,1,0,0},
-    {"zunionstore",zunionstoreCommand,-4,REDIS_CMD_DENYOOM,zunionInterBlockClientOnSwappedKeys,0,0,0,0,0},
-    {"zinterstore",zinterstoreCommand,-4,REDIS_CMD_DENYOOM,zunionInterBlockClientOnSwappedKeys,0,0,0,0,0},
+    {"zunionstore",zunionstoreCommand,-4,REDIS_CMD_DENYOOM,zunionInterGetKeys,0,0,0,0,0},
+    {"zinterstore",zinterstoreCommand,-4,REDIS_CMD_DENYOOM,zunionInterGetKeys,0,0,0,0,0},
     {"zrange",zrangeCommand,-4,0,NULL,1,1,1,0,0},
     {"zrangebyscore",zrangebyscoreCommand,-4,0,NULL,1,1,1,0,0},
     {"zrevrangebyscore",zrevrangebyscoreCommand,-4,0,NULL,1,1,1,0,0},
@@ -152,10 +152,10 @@ struct redisCommand redisCommandTable[] = {
     {"randomkey",randomkeyCommand,1,0,NULL,0,0,0,0,0},
     {"select",selectCommand,2,0,NULL,0,0,0,0,0},
     {"move",moveCommand,3,0,NULL,1,1,1,0,0},
-    {"rename",renameCommand,3,0,NULL,1,1,1,0,0},
-    {"renamenx",renamenxCommand,3,0,NULL,1,1,1,0,0},
-    {"expire",expireCommand,3,0,NULL,0,0,0,0,0},
-    {"expireat",expireatCommand,3,0,NULL,0,0,0,0,0},
+    {"rename",renameCommand,3,0,renameGetKeys,1,2,1,0,0},
+    {"renamenx",renamenxCommand,3,0,renameGetKeys,1,2,1,0,0},
+    {"expire",expireCommand,3,0,NULL,1,1,1,0,0},
+    {"expireat",expireatCommand,3,0,NULL,1,1,1,0,0},
     {"keys",keysCommand,2,0,NULL,0,0,0,0,0},
     {"dbsize",dbsizeCommand,1,0,NULL,0,0,0,0,0},
     {"auth",authCommand,2,0,NULL,0,0,0,0,0},
@@ -168,7 +168,7 @@ struct redisCommand redisCommandTable[] = {
     {"lastsave",lastsaveCommand,1,0,NULL,0,0,0,0,0},
     {"type",typeCommand,2,0,NULL,1,1,1,0,0},
     {"multi",multiCommand,1,0,NULL,0,0,0,0,0},
-    {"exec",execCommand,1,REDIS_CMD_DENYOOM,execBlockClientOnSwappedKeys,0,0,0,0,0},
+    {"exec",execCommand,1,REDIS_CMD_DENYOOM,NULL,0,0,0,0,0},
     {"discard",discardCommand,1,0,NULL,0,0,0,0,0},
     {"sync",syncCommand,1,0,NULL,0,0,0,0,0},
     {"flushdb",flushdbCommand,1,0,NULL,0,0,0,0,0},
@@ -188,6 +188,12 @@ struct redisCommand redisCommandTable[] = {
     {"publish",publishCommand,3,REDIS_CMD_FORCE_REPLICATION,NULL,0,0,0,0,0},
     {"watch",watchCommand,-2,0,NULL,0,0,0,0,0},
     {"unwatch",unwatchCommand,1,0,NULL,0,0,0,0,0},
+    {"watch",watchCommand,-2,0,noPreloadGetKeys,1,-1,1,0,0},
+    {"unwatch",unwatchCommand,1,0,NULL,0,0,0,0,0},
+    {"cluster",clusterCommand,-2,0,NULL,0,0,0,0,0},
+    {"restore",restoreCommand,4,0,NULL,0,0,0,0,0},
+    {"migrate",migrateCommand,6,0,NULL,0,0,0,0,0},
+    {"dump",dumpCommand,2,0,NULL,0,0,0,0,0},
     {"recycle",recycleCommand,2,0,NULL,1,1,1,0,0},
     {"recycleto",recycletoCommand,1,0,NULL,0,0,0,0,0},
     {"dispose",disposeCommand,1,0,NULL,0,0,0,0,0}
@@ -195,23 +201,19 @@ struct redisCommand redisCommandTable[] = {
 
 /*============================ Utility functions ============================ */
 
-void redisLog(int level, const char *fmt, ...) {
+/* Low level logging. To use only for very big messages, otherwise
+ * redisLog() is to prefer. */
+void redisLogRaw(int level, const char *msg) {
     const int syslogLevelMap[] = { LOG_DEBUG, LOG_INFO, LOG_NOTICE, LOG_WARNING };
     const char *c = ".-*#";
     time_t now = time(NULL);
-    va_list ap;
     FILE *fp;
     char buf[64];
-    char msg[REDIS_MAX_LOGMSG_LEN];
 
     if (level < server.verbosity) return;
 
     fp = (server.logfile == NULL) ? stdout : fopen(server.logfile,"a");
     if (!fp) return;
-
-    va_start(ap, fmt);
-    vsnprintf(msg, sizeof(msg), fmt, ap);
-    va_end(ap);
 
     strftime(buf,sizeof(buf),"%d %b %H:%M:%S",localtime(&now));
     fprintf(fp,"[%d] %s %c %s\n",(int)getpid(),buf,c[level],msg);
@@ -220,6 +222,22 @@ void redisLog(int level, const char *fmt, ...) {
     if (server.logfile) fclose(fp);
 
     if (server.syslog_enabled) syslog(syslogLevelMap[level], "%s", msg);
+}
+
+/* Like redisLogRaw() but with printf-alike support. This is the funciton that
+ * is used across the code. The raw version is only used in order to dump
+ * the INFO output on crash. */
+void redisLog(int level, const char *fmt, ...) {
+    va_list ap;
+    char msg[REDIS_MAX_LOGMSG_LEN];
+
+    if (level < server.verbosity) return;
+
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+
+    redisLogRaw(level,msg);
 }
 
 /* Redis generally does not try to recover from out of memory conditions
@@ -429,6 +447,17 @@ dictType keylistDictType = {
     dictObjKeyCompare,          /* key compare */
     dictRedisObjectDestructor,  /* key destructor */
     dictListDestructor          /* val destructor */
+};
+
+/* Cluster nodes hash table, mapping nodes addresses 1.2.3.4:6379 to
+ * clusterNode structures. */
+dictType clusterNodesDictType = {
+    dictSdsHash,                /* hash function */
+    NULL,                       /* key dup */
+    NULL,                       /* val dup */
+    dictSdsKeyCompare,          /* key compare */
+    dictSdsDestructor,          /* key destructor */
+    NULL                        /* val destructor */
 };
 
 int htNeedsResize(dict *dict) {
@@ -660,6 +689,9 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
      * to detect transfer failures. */
     if (!(loops % 10)) replicationCron();
 
+    /* Run other sub-systems specific cron jobs */
+    if (server.cluster_enabled && !(loops % 10)) clusterCron();
+
     server.cronloops++;
     return 100;
 }
@@ -814,6 +846,8 @@ void initServerConfig() {
     server.set_max_intset_entries = REDIS_SET_MAX_INTSET_ENTRIES;
     server.shutdown_asap = 0;
     server.cache_flush_delay = 0;
+    server.cluster_enabled = 0;
+    server.cluster.configfile = zstrdup("nodes.conf");
 
     updateLRUClock();
     resetServerSaveParams();
@@ -850,7 +884,7 @@ void initServer() {
 
     signal(SIGHUP, SIG_IGN);
     signal(SIGPIPE, SIG_IGN);
-    setupSigSegvAction();
+    setupSignalHandlers();
 
     if (server.syslog_enabled) {
         openlog(server.syslog_ident, LOG_PID | LOG_NDELAY | LOG_NOWAIT,
@@ -867,10 +901,13 @@ void initServer() {
     createSharedObjects();
     server.el = aeCreateEventLoop();
     server.db = zmalloc(sizeof(redisDb)*server.dbnum);
-    server.ipfd = anetTcpServer(server.neterr,server.port,server.bindaddr);
-    if (server.ipfd == ANET_ERR) {
-        redisLog(REDIS_WARNING, "Opening port: %s", server.neterr);
-        exit(1);
+
+    if (server.port != 0) {
+        server.ipfd = anetTcpServer(server.neterr,server.port,server.bindaddr);
+        if (server.ipfd == ANET_ERR) {
+            redisLog(REDIS_WARNING, "Opening port: %s", server.neterr);
+            exit(1);
+        }
     }
     if (server.unixsocket != NULL) {
         unlink(server.unixsocket); /* don't care if this fails */
@@ -934,6 +971,8 @@ void initServer() {
     }
 
     if (server.ds_enabled) dsInit();
+    if (server.cluster_enabled) clusterInit();
+    srand(time(NULL)^getpid());
 }
 
 /* Populates the Redis Command Table starting from the hard coded list
@@ -1037,6 +1076,27 @@ int processCommand(redisClient *c) {
     if (server.requirepass && !c->authenticated && cmd->proc != authCommand) {
         addReplyError(c,"operation not permitted");
         return REDIS_OK;
+    }
+
+    /* If cluster is enabled, redirect here */
+    if (server.cluster_enabled &&
+                !(cmd->getkeys_proc == NULL && cmd->firstkey == 0)) {
+        int hashslot;
+
+        if (server.cluster.state != REDIS_CLUSTER_OK) {
+            addReplyError(c,"The cluster is down. Check with CLUSTER INFO for more information");
+            return REDIS_OK;
+        } else {
+            clusterNode *n = getNodeByQuery(c,cmd,c->argv,c->argc,&hashslot);
+            if (n == NULL) {
+                addReplyError(c,"Invalid cross-node request");
+                return REDIS_OK;
+            } else if (n != server.cluster.myself) {
+                addReplySds(c,sdscatprintf(sdsempty(),
+                    "-MOVED %d %s:%d\r\n",hashslot,n->ip,n->port));
+                return REDIS_OK;
+            }
+        }
     }
 
     /* Handle the maxmemory directive.
@@ -1336,8 +1396,18 @@ sds genRedisInfoString(char *section) {
             info = sdscatprintf(info,
                 "cache_max_memory:%llu\r\n"
                 "cache_blocked_clients:%lu\r\n"
+                "cache_io_queue_len:%lu\r\n"
+                "cache_io_jobs_new:%lu\r\n"
+                "cache_io_jobs_processing:%lu\r\n"
+                "cache_io_jobs_processed:%lu\r\n"
+                "cache_io_ready_clients:%lu\r\n"
                 ,(unsigned long long) server.cache_max_memory,
-                (unsigned long) server.cache_blocked_clients
+                (unsigned long) server.cache_blocked_clients,
+                (unsigned long) listLength(server.cache_io_queue),
+                (unsigned long) listLength(server.io_newjobs),
+                (unsigned long) listLength(server.io_processing),
+                (unsigned long) listLength(server.io_processed),
+                (unsigned long) listLength(server.io_ready_clients)
             );
             unlockThreadedIO();
         }
@@ -1643,7 +1713,7 @@ void usage() {
 }
 
 int main(int argc, char **argv) {
-    time_t start;
+    long long start;
 
     initServerConfig();
     if (argc == 2) {
@@ -1664,15 +1734,15 @@ int main(int argc, char **argv) {
 #ifdef __linux__
     linuxOvercommitMemoryWarning();
 #endif
-    start = time(NULL);
+    start = ustime();
     if (server.ds_enabled) {
         redisLog(REDIS_NOTICE,"DB not loaded (running with disk back end)");
     } else if (server.appendonly) {
         if (loadAppendOnlyFile(server.appendfilename) == REDIS_OK)
-            redisLog(REDIS_NOTICE,"DB loaded from append only file: %ld seconds",time(NULL)-start);
+            redisLog(REDIS_NOTICE,"DB loaded from append only file: %.3f seconds",(float)(ustime()-start)/1000000);
     } else {
         if (rdbLoad(server.dbfilename) == REDIS_OK)
-            redisLog(REDIS_NOTICE,"DB loaded from disk: %ld seconds",time(NULL)-start);
+            redisLog(REDIS_NOTICE,"DB loaded from disk: %.3f seconds",(float)(ustime()-start)/1000000);
     }
     if (server.ipfd > 0)
         redisLog(REDIS_NOTICE,"The server is now ready to accept connections on port %d", server.port);
@@ -1684,10 +1754,8 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-/* ============================= Backtrace support ========================= */
-
 #ifdef HAVE_BACKTRACE
-void *getMcontextEip(ucontext_t *uc) {
+static void *getMcontextEip(ucontext_t *uc) {
 #if defined(__FreeBSD__)
     return (void*) uc->uc_mcontext.mc_eip;
 #elif defined(__dietlibc__)
@@ -1715,7 +1783,7 @@ void *getMcontextEip(ucontext_t *uc) {
 #endif
 }
 
-void segvHandler(int sig, siginfo_t *info, void *secret) {
+static void sigsegvHandler(int sig, siginfo_t *info, void *secret) {
     void *trace[100];
     char **messages = NULL;
     int i, trace_size = 0;
@@ -1727,7 +1795,7 @@ void segvHandler(int sig, siginfo_t *info, void *secret) {
     redisLog(REDIS_WARNING,
         "======= Ooops! Redis %s got signal: -%d- =======", REDIS_VERSION, sig);
     infostring = genRedisInfoString("all");
-    redisLog(REDIS_WARNING, "%s",infostring);
+    redisLogRaw(REDIS_WARNING, infostring);
     /* It's not safe to sdsfree() the returned string under memory
      * corruption conditions. Let it leak as we are going to abort */
 
@@ -1754,37 +1822,35 @@ void segvHandler(int sig, siginfo_t *info, void *secret) {
     sigaction (sig, &act, NULL);
     kill(getpid(),sig);
 }
+#endif /* HAVE_BACKTRACE */
 
-void sigtermHandler(int sig) {
+static void sigtermHandler(int sig) {
     REDIS_NOTUSED(sig);
 
-    redisLog(REDIS_WARNING,"SIGTERM received, scheduling shutting down...");
+    redisLog(REDIS_WARNING,"Received SIGTERM, scheduling shutdown...");
     server.shutdown_asap = 1;
 }
 
-void setupSigSegvAction(void) {
+void setupSignalHandlers(void) {
     struct sigaction act;
 
-    sigemptyset (&act.sa_mask);
-    /* When the SA_SIGINFO flag is set in sa_flags then sa_sigaction
-     * is used. Otherwise, sa_handler is used */
-    act.sa_flags = SA_NODEFER | SA_ONSTACK | SA_RESETHAND | SA_SIGINFO;
-    act.sa_sigaction = segvHandler;
-    sigaction (SIGSEGV, &act, NULL);
-    sigaction (SIGBUS, &act, NULL);
-    sigaction (SIGFPE, &act, NULL);
-    sigaction (SIGILL, &act, NULL);
-    sigaction (SIGBUS, &act, NULL);
-
+    /* When the SA_SIGINFO flag is set in sa_flags then sa_sigaction is used.
+     * Otherwise, sa_handler is used. */
+    sigemptyset(&act.sa_mask);
     act.sa_flags = SA_NODEFER | SA_ONSTACK | SA_RESETHAND;
     act.sa_handler = sigtermHandler;
-    sigaction (SIGTERM, &act, NULL);
+    sigaction(SIGTERM, &act, NULL);
+
+#ifdef HAVE_BACKTRACE
+    sigemptyset(&act.sa_mask);
+    act.sa_flags = SA_NODEFER | SA_ONSTACK | SA_RESETHAND | SA_SIGINFO;
+    act.sa_sigaction = sigsegvHandler;
+    sigaction(SIGSEGV, &act, NULL);
+    sigaction(SIGBUS, &act, NULL);
+    sigaction(SIGFPE, &act, NULL);
+    sigaction(SIGILL, &act, NULL);
+#endif
     return;
 }
-
-#else /* HAVE_BACKTRACE */
-void setupSigSegvAction(void) {
-}
-#endif /* HAVE_BACKTRACE */
 
 /* The End */
