@@ -23,6 +23,11 @@ struct commandHelp {
   int group;
   char *since;
 } commandHelp[] = {
+    { "BLOCK",
+    "",
+    "Blocking command simulation",
+    0,
+    "2.2" },
     { "APPEND",
     "key value",
     "Append a value to a key",

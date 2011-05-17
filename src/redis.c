@@ -193,7 +193,8 @@ struct redisCommand redisCommandTable[] = {
     {"migrate",migrateCommand,6,0,NULL,0,0,0,0,0},
     {"dump",dumpCommand,2,0,NULL,0,0,0,0,0},
     {"object",objectCommand,-2,0,NULL,0,0,0,0,0},
-    {"client",clientCommand,-2,0,NULL,0,0,0,0,0}
+    {"client",clientCommand,-2,0,NULL,0,0,0,0,0},
+    {"block",blockCommand,1,0,NULL,0,0,0,0,0}
 };
 
 /*============================ Utility functions ============================ */

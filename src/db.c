@@ -636,6 +636,11 @@ void persistCommand(redisClient *c) {
     }
 }
 
+void blockCommand(redisClient *c) {
+    sleep(1);
+    addReply(c,shared.ok);
+}
+
 /* -----------------------------------------------------------------------------
  * API to get key arguments from commands
  * ---------------------------------------------------------------------------*/

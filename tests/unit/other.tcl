@@ -243,6 +243,10 @@ start_server {tags {"other"}} {
         lappend aux [r dbsize]
     } {0 0}
 
+    test {BLOCK} {
+        r block
+    } {OK}
+
     test {Perform a final SAVE to leave a clean DB on disk} {
         r save
     } {OK}
