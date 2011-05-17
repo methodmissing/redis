@@ -1032,7 +1032,9 @@ void call(redisClient *c, struct redisCommand *cmd) {
     long long dirty, start = ustime();
 
     dirty = server.dirty;
+    TRACE_ENTRY(COMMAND,(char*)cmd->name);
     cmd->proc(c);
+    TRACE_RETURN(COMMAND,(char*)cmd->name);
     dirty = server.dirty-dirty;
     cmd->microseconds += ustime()-start;
     cmd->calls++;

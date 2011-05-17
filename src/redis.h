@@ -1205,6 +1205,12 @@ void objectCommand(redisClient *c);
 void clientCommand(redisClient *c);
 void blockCommand(redisClient *c);
 
+#include "probes.h"
+#define TRACE_ENTRY(type, ...) \
+   if(REDIS_##type##_ENTRY_ENABLED()) REDIS_##type##_ENTRY(__VA_ARGS__)
+#define TRACE_RETURN(type, ...) \
+   if(REDIS_##type##_RETURN_ENABLED()) REDIS_##type##_RETURN(__VA_ARGS__)
+
 #if defined(__GNUC__)
 void *calloc(size_t count, size_t size) __attribute__ ((deprecated));
 void free(void *ptr) __attribute__ ((deprecated));

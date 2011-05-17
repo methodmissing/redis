@@ -31,6 +31,7 @@ ifeq ($(USE_JEMALLOC),yes)
 endif
 
 CCLINK+= $(ALLOC_LINK)
+CCLINK+= -ldtrace
 CFLAGS+= $(ALLOC_FLAGS)
 
 CCOPT= $(CFLAGS) $(CCLINK) $(ARCH) $(PROF)
@@ -59,7 +60,7 @@ CLIPRGNAME = redis-cli
 CHECKDUMPPRGNAME = redis-check-dump
 CHECKAOFPRGNAME = redis-check-aof
 
-all: redis-benchmark redis-cli redis-check-dump redis-check-aof redis-server
+all: dtrace redis-benchmark redis-cli redis-check-dump redis-check-aof redis-server
 	@echo ""
 	@echo "Hint: To run 'make test' is a good idea ;)"
 	@echo ""
@@ -185,6 +186,9 @@ bench:
 
 log:
 	git log '--pretty=format:%ad %s (%cn)' --date=short > ../Changelog
+
+dtrace:
+	dtrace -v -h -o probes.h -s probes.d
 
 32bit:
 	@echo ""
