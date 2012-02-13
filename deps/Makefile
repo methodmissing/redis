@@ -59,6 +59,6 @@ jemalloc: .make-arch
 
 zeromq: .make-arch
 	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)zeromq$(ENDCOLOR)
-	cd zeromq && CFLAGS="$CFLAGS -arch $(ARCH)" CXXFLAGS="$CXXFLAGS -arch $(ARCH)"./configure --without-documentation && $(MAKE)
+	cd zeromq && ./configure --without-documentation && $(MAKE)
 
 .PHONY: default conditional_clean hiredis linenoise lua jemalloc
