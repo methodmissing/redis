@@ -1,0 +1,18 @@
+* Message frames
+  - db
+  - event
+  - key
+  - payload(<type><value>)
+* Ensure ZMQ termination on exit
+* Validate ZeroMQ URI template
+* Slow joiner issues
+* zmqInit()
+* zmq endpoint length
+* Zero copy ?
+* Note send for pub sockets never blocks
+* HWM is just the size of the message buffer in the particular socket.
+* The publisher's HWM affects all subscribers, independently.
+* Framing strategy ?
+* tests: Could not bind ZeroMQ PUB socket for DB 0 to endpoint tcp://127.0.0.1:5000: Address already in use
+* Style !!!
+* config get for io threads, hwm, swap and linger as well

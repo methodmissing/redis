@@ -2066,7 +2066,8 @@ void setupSignalHandlers(void) {
     return;
 }
 
-int initZmqSocket(void) {
+#ifdef USE_ZEROMQ
+int zeromqInitSocket(void) {
    server.zeromq_sock = zmq_socket(server.zeromq_context, ZMQ_PUB);
     if (server.zeromq_sock == NULL) {
         redisLog(REDIS_WARNING, "Could not initialize ZeroMQ socket: %s", zmq_strerror(zmq_errno()));
@@ -2093,6 +2094,7 @@ int initZmqSocket(void) {
 
     return REDIS_OK;
 }
+#endif
 
 int main(int argc, char **argv) {
     long long start;
@@ -2151,7 +2153,7 @@ int main(int argc, char **argv) {
 #endif
 #ifdef USE_ZEROMQ
     if (server.zeromq_uri) {
-       if (initZmqSocket() == REDIS_OK) {
+       if (zeromqInitSocket() == REDIS_OK) {
             redisLog(REDIS_NOTICE,"ZeroMQ PUB socket initialized.");
         } else {
             redisLog(REDIS_WARNING,"Fatal error initializing ZeroMQ PUB socket. Exiting.");
