@@ -336,6 +336,35 @@ void loadServerConfigFromString(char *config) {
             server.client_obuf_limits[class].hard_limit_bytes = hard;
             server.client_obuf_limits[class].soft_limit_bytes = soft;
             server.client_obuf_limits[class].soft_limit_seconds = soft_seconds;
+#ifdef USE_ZEROMQ
+        } else if (!strcasecmp(argv[0],"zeromq-uri") && argc == 2) {
+            zfree(server.zeromq_uri);
+            server.zeromq_uri = zstrdup(argv[1]);
+        } else if (!strcasecmp(argv[0],"zeromq-io-threads") && argc == 2) {
+            server.zeromq_io_threads = atoi(argv[1]);
+            if (server.zeromq_io_threads < 0) {
+                err = "negative IO threads not supported";
+                goto loaderr;
+            }
+        } else if (!strcasecmp(argv[0],"zeromq-hwm") && argc == 2) {
+            server.zeromq_hwm = atoi(argv[1]);
+            if (server.zeromq_hwm < 0) {
+                err = "negative high water mark (HWM) not supported";
+                goto loaderr;
+            }
+        } else if (!strcasecmp(argv[0],"zeromq-swap") && argc == 2) {
+            server.zeromq_swap = atoi(argv[1]);
+            if (server.zeromq_hwm < 0) {
+                err = "negative high water mark (HWM) not supported";
+                goto loaderr;
+            }
+        } else if (!strcasecmp(argv[0],"zeromq-linger") && argc == 2) {
+            server.zeromq_linger = atoi(argv[1]);
+            if (server.zeromq_linger < 0) {
+                err = "a linger value < -1 is not supported";
+                goto loaderr;
+            }
+#endif
         } else {
             err = "Bad directive or wrong number of arguments"; goto loaderr;
         }
@@ -822,6 +851,33 @@ void configGetCommand(redisClient *c) {
         sdsfree(buf);
         matches++;
     }
+#ifdef USE_ZEROMQ
+    if (stringmatch(pattern,"zeromq-uri",0)) {
+        addReplyBulkCString(c,"zeromq-uri");
+        addReplyBulkCString(c,server.zeromq_uri);
+        matches++;
+    }
+    if (stringmatch(pattern,"zeromq-io-threads",0)) {
+        addReplyBulkCString(c,"zeromq-io-threads");
+        addReplyBulkLongLong(c,server.zeromq_io_threads);
+        matches++;
+    }
+    if (stringmatch(pattern,"zeromq-hwm",0)) {
+        addReplyBulkCString(c,"zeromq-hwm");
+        addReplyBulkLongLong(c,server.zeromq_hwm);
+        matches++;
+    }
+    if (stringmatch(pattern,"zeromq-swap",0)) {
+        addReplyBulkCString(c,"zeromq-swap");
+        addReplyBulkLongLong(c,server.zeromq_swap);
+        matches++;
+    }
+    if (stringmatch(pattern,"zeromq-linger",0)) {
+        addReplyBulkCString(c,"zeromq-linger");
+        addReplyBulkLongLong(c,server.zeromq_linger);
+        matches++;
+    }
+#endif
     setDeferredMultiBulkLength(c,replylen,matches*2);
 }
 

@@ -6,6 +6,73 @@
 void SlotToKeyAdd(robj *key);
 void SlotToKeyDel(robj *key);
 
+#ifdef USE_ZEROMQ
+int zeromqSend(char *str, size_t len, int flags, char *on_error) {
+    int rc;
+    size_t bytes;
+    zmq_msg_t msg;
+    zmq_msg_init_size(&msg, len);
+    memcpy(zmq_msg_data(&msg), str, len);
+    bytes = zmq_msg_size(&msg);
+    rc = zmq_send(server.zeromq_sock, &msg, flags);
+    zmq_msg_close(&msg);
+    if (rc != -1) {
+        server.stat_zeromq_frames++;
+        server.stat_zeromq_bytes += bytes;
+    } else {
+        redisLog(REDIS_WARNING, on_error, zmq_strerror(zmq_errno()));
+    }
+    return rc;
+}
+
+void zeromqNotify(redisDb *db, int key_event, robj *key, robj *val) {
+    int rc_db, rc_event, rc_key, rc_val;
+    char event[2];
+    char db_num[2];
+    rio payload;
+
+    sprintf(event, "%d", key_event);
+    sprintf(db_num, "%d", db->id);
+
+    if (val) {
+        rioInitWithBuffer(&payload,sdsempty());
+        redisAssertWithInfo(NULL, val,rdbSaveObjectType(&payload,val));
+        redisAssertWithInfo(NULL, val,rdbSaveObject(&payload,val) != -1);
+    }
+
+    rc_db = zeromqSend(db_num, (size_t)2, ZMQ_SNDMORE, "Could not send DB num: %s");
+    rc_event = zeromqSend(event, (size_t)2, (key? ZMQ_SNDMORE : 0), "Could not send event: %s");
+    if (key)
+        rc_key = zeromqSend((char *)key->ptr, (size_t)sdslen(key->ptr), (val? ZMQ_SNDMORE : 0), "Could not send key: %s");
+    if (val)
+        rc_val = zeromqSend((char *)payload.io.buffer.ptr, (size_t)sdslen(payload.io.buffer.ptr), 0, "Could not send payload: %s");
+
+    if (val) sdsfree(payload.io.buffer.ptr);
+    if (rc_db != -1 && rc_event != -1 && rc_key != -1 && rc_val != -1)
+        server.stat_zeromq_events++;
+}
+
+void zeromqNotifyKeyAdded(redisDb *db, robj *key, robj *val) {
+    zeromqNotify(db, REDIS_ZEROMQ_EVENT_KEY_ADDED, key, val);
+}
+
+void zeromqNotifyKeyUpdated(redisDb *db, robj *key, robj *val) {
+    zeromqNotify(db, REDIS_ZEROMQ_EVENT_KEY_UPDATED, key, val);
+}
+
+void zeromqNotifyKeyLoaded(redisDb *db, robj *key, robj *val) {
+    zeromqNotify(db, REDIS_ZEROMQ_EVENT_KEY_LOADED, key, val);
+}
+
+void zeromqNotifyKeyDeleted(redisDb *db, robj *key) {
+    zeromqNotify(db, REDIS_ZEROMQ_EVENT_KEY_DELETED, key, NULL);
+}
+
+void zeromqNotifyDbFlushed(redisDb *db) {
+    zeromqNotify(db, REDIS_ZEROMQ_EVENT_DB_FLUSHED, NULL, NULL);
+}
+#endif
+
 /*-----------------------------------------------------------------------------
  * C-level DB API
  *----------------------------------------------------------------------------*/
@@ -87,7 +154,16 @@ void dbAdd(redisDb *db, robj *key, robj *val) {
 
     redisAssertWithInfo(NULL,key,retval == REDIS_OK);
     if (server.cluster_enabled) SlotToKeyAdd(key);
- }
+#ifdef USE_ZEROMQ
+    if (server.zeromq_uri) {
+        if (server.loading == 1) {
+            zeromqNotifyKeyLoaded(db, key, val);
+        } else {
+            zeromqNotifyKeyAdded(db, key, val);
+        }
+    }
+#endif
+}
 
 /* Overwrite an existing key with a new value. Incrementing the reference
  * count of the new value is up to the caller.
@@ -99,6 +175,9 @@ void dbOverwrite(redisDb *db, robj *key, robj *val) {
     
     redisAssertWithInfo(NULL,key,de != NULL);
     dictReplace(db->dict, key->ptr, val);
+#ifdef USE_ZEROMQ
+    if (server.zeromq_uri) zeromqNotifyKeyUpdated(db, key, val);
+#endif
 }
 
 /* High level Set operation. This function can be used in order to set
@@ -155,6 +234,9 @@ int dbDelete(redisDb *db, robj *key) {
     if (dictSize(db->expires) > 0) dictDelete(db->expires,key->ptr);
     if (dictDelete(db->dict,key->ptr) == DICT_OK) {
         if (server.cluster_enabled) SlotToKeyDel(key);
+#ifdef USE_ZEROMQ
+        if (server.zeromq_uri) zeromqNotifyKeyDeleted(db, key);
+#endif
         return 1;
     } else {
         return 0;
@@ -171,6 +253,9 @@ long long emptyDb() {
         removed += dictSize(server.db[j].dict);
         dictEmpty(server.db[j].dict);
         dictEmpty(server.db[j].expires);
+#ifdef USE_ZEROMQ
+        if (server.zeromq_uri) zeromqNotifyDbFlushed(&server.db[j]);
+#endif
     }
     return removed;
 }
@@ -208,6 +293,9 @@ void flushdbCommand(redisClient *c) {
     signalFlushedDb(c->db->id);
     dictEmpty(c->db->dict);
     dictEmpty(c->db->expires);
+#ifdef USE_ZEROMQ
+        if (server.zeromq_uri) zeromqNotifyDbFlushed(c->db);
+#endif
     addReply(c,shared.ok);
 }
 

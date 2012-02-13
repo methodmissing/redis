@@ -24,6 +24,12 @@ else
   MALLOC?=libc
 endif
 
+ifeq ($(ZEROMQ),yes)
+  CCLINK+=../deps/zeromq/src/.libs/libzmq.dylib
+  CFLAGS+=-DUSE_ZEROMQ -I../deps/zeromq/include
+  DEPENDENCY_TARGETS+= zeromq
+endif
+
 # Backwards compatibility for selecting an allocator
 ifeq ($(USE_TCMALLOC),yes)
   MALLOC=tcmalloc

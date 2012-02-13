@@ -967,6 +967,19 @@ void initServerConfig() {
     server.assert_file = "<no file>";
     server.assert_line = 0;
     server.bug_report_start = 0;
+
+#ifdef USE_ZEROMQ
+    server.zeromq_io_threads = REDIS_ZEROMQ_CONTEXT_IO_THREADS;
+    server.zeromq_uri = zstrdup(REDIS_ZEROMQ_SOCKET_URI);
+    server.zeromq_hwm = REDIS_ZEROMQ_SOCKET_HWM;
+    server.zeromq_swap = REDIS_ZEROMQ_SOCKET_SWAP;
+    server.zeromq_linger = REDIS_ZEROMQ_SOCKET_LINGER;
+    server.zeromq_context = NULL;
+    server.zeromq_sock = NULL;
+    server.stat_zeromq_frames = 0;
+    server.stat_zeromq_events = 0;
+    server.stat_zeromq_bytes = 0;
+#endif
 }
 
 /* This function will try to raise the max number of open files accordingly to
@@ -1104,6 +1117,19 @@ void initServer() {
         server.maxmemory = 3584LL*(1024*1024); /* 3584 MB = 3.5 GB */
         server.maxmemory_policy = REDIS_MAXMEMORY_NO_EVICTION;
     }
+
+#ifdef USE_ZEROMQ
+    if (server.zeromq_uri) {
+        server.zeromq_context = zmq_init(server.zeromq_io_threads);
+        if (server.zeromq_context == NULL) {
+            char err[255];
+            sprintf(err, "Could not initialize server ZeroMQ context: %s", zmq_strerror(zmq_errno()));
+            redisPanic(err);
+        }
+        redisLog(REDIS_NOTICE,"ZeroMQ context initialized");
+        redisLog(REDIS_NOTICE,"ZeroMQ PUB socket URI is %s", server.zeromq_uri);
+    }
+#endif
 
     if (server.cluster_enabled) clusterInit();
     scriptingInit();
@@ -1383,7 +1409,20 @@ int prepareForShutdown(int flags) {
         redisLog(REDIS_NOTICE,"Removing the unix socket file.");
         unlink(server.unixsocket); /* don't care if this fails */
     }
-
+#ifdef USE_ZEROMQ
+    if (server.zeromq_sock) {
+        if (zmq_close(server.zeromq_sock) == -1) {
+            redisLog(REDIS_WARNING, "Failed to terminate the ZeroMQ PUB socket: %s", zmq_strerror(zmq_errno()));
+        } else {
+            redisLog(REDIS_NOTICE,"ZeroMQ PUB socket closed");
+        }
+        if (zmq_term(server.zeromq_context) == -1) {
+            redisLog(REDIS_WARNING, "Failed to terminate the ZeroMQ context: %s", zmq_strerror(zmq_errno()));
+        } else {
+            redisLog(REDIS_NOTICE,"ZeroMQ context terminated");
+        }
+    }
+#endif
     redisLog(REDIS_WARNING,"Redis is now ready to exit, bye bye...");
     return REDIS_OK;
 }
@@ -1484,6 +1523,27 @@ sds genRedisInfoString(char *section) {
             uptime/(3600*24),
             (unsigned long) server.lruclock);
     }
+
+#ifdef USE_ZEROMQ
+    /* ZeroMQ */
+    if (allsections || defsections || !strcasecmp(section,"zeromq")) {
+        if (sections++) info = sdscat(info,"\r\n");
+        int major, minor, patch;
+        zmq_version(&major, &minor, &patch);
+        info = sdscatprintf(info,
+             "# ZeroMQ\r\n"
+             "version:%d.%d.%d\r\n",
+             major,
+             minor,
+             patch);
+        info = sdscatprintf(info, "io_threads:%d\r\n", server.zeromq_io_threads);
+        if (server.zeromq_uri)
+             info = sdscatprintf(info, "uri:%s\r\n", server.zeromq_uri);
+        info = sdscatprintf(info, "hwm:%d\r\n", server.zeromq_hwm);
+        info = sdscatprintf(info, "swap:%d\r\n", server.zeromq_swap);
+        info = sdscatprintf(info, "linger:%d\r\n", server.zeromq_linger);
+    }
+#endif
 
     /* Clients */
     if (allsections || defsections || !strcasecmp(section,"clients")) {
@@ -1617,6 +1677,17 @@ sds genRedisInfoString(char *section) {
             dictSize(server.pubsub_channels),
             listLength(server.pubsub_patterns),
             server.stat_fork_time);
+#ifdef USE_ZEROMQ
+    if (server.zeromq_uri) {
+        info = sdscatprintf(info,
+             "zeromq_events:%lld\r\n"
+             "zeromq_frames:%lld\r\n"
+             "zeromq_bytes:%lld\r\n",
+             server.stat_zeromq_events,
+             server.stat_zeromq_frames,
+             server.stat_zeromq_bytes);
+    }
+#endif
     }
 
     /* Replication */
@@ -1995,6 +2066,34 @@ void setupSignalHandlers(void) {
     return;
 }
 
+int initZmqSocket(void) {
+   server.zeromq_sock = zmq_socket(server.zeromq_context, ZMQ_PUB);
+    if (server.zeromq_sock == NULL) {
+        redisLog(REDIS_WARNING, "Could not initialize ZeroMQ socket: %s", zmq_strerror(zmq_errno()));
+        return REDIS_ERR;
+    }
+    if (zmq_setsockopt(server.zeromq_sock, ZMQ_HWM, (int64_t *)&server.zeromq_hwm, sizeof(int64_t)) == -1) {
+        redisLog(REDIS_WARNING, "Could not set ZeroMQ PUB socket HWM option to %d: %s", server.zeromq_hwm, zmq_strerror(zmq_errno()));
+        return REDIS_ERR;
+    }
+    if (zmq_setsockopt(server.zeromq_sock, ZMQ_SWAP, (int64_t *)&server.zeromq_swap, sizeof(int64_t)) == -1) {
+        redisLog(REDIS_WARNING, "Could not set ZeroMQ PUB socket SWAP option to %d: %s", server.zeromq_swap, zmq_strerror(zmq_errno()));
+        return REDIS_ERR;
+    }
+    if (zmq_setsockopt(server.zeromq_sock, ZMQ_LINGER, &server.zeromq_linger, sizeof(int)) == -1) {
+        redisLog(REDIS_WARNING, "Could not set ZeroMQ PUB socket LINGER option to %d: %s", server.zeromq_linger, zmq_strerror(zmq_errno()));
+        return REDIS_ERR;
+    }
+    if (zmq_bind(server.zeromq_sock, server.zeromq_uri) == -1) {
+        redisLog(REDIS_WARNING, "Could not bind ZeroMQ PUB socket to endpoint %s: %s", server.zeromq_uri, zmq_strerror(zmq_errno()));
+        return REDIS_ERR;
+    } else {
+        redisLog(REDIS_NOTICE, "ZeroMQ PUB socket bound to endpoint %s", server.zeromq_uri);
+    }
+
+    return REDIS_OK;
+}
+
 int main(int argc, char **argv) {
     long long start;
     struct timeval tv;
@@ -2049,6 +2148,16 @@ int main(int argc, char **argv) {
     redisLog(REDIS_WARNING,"Server started, Redis version " REDIS_VERSION);
 #ifdef __linux__
     linuxOvercommitMemoryWarning();
+#endif
+#ifdef USE_ZEROMQ
+    if (server.zeromq_uri) {
+       if (initZmqSocket() == REDIS_OK) {
+            redisLog(REDIS_NOTICE,"ZeroMQ PUB socket initialized.");
+        } else {
+            redisLog(REDIS_WARNING,"Fatal error initializing ZeroMQ PUB socket. Exiting.");
+            exit(1);
+        }
+    }
 #endif
     start = ustime();
     if (server.aof_state == REDIS_AOF_ON) {
