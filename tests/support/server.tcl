@@ -154,6 +154,11 @@ proc start_server {options {code undefined}} {
     # use a different directory every time a server is started
     dict set config dir [tmpdir server]
     
+    # start every ZeroMQ PUB socket on a different port
+    set zeromq_port [find_available_port 5000]
+    set ::zeromq_uri "tcp://127.0.0.1:${zeromq_port}"
+    dict set config zeromq-uri $::zeromq_uri
+
     # start every server on a different port
     set ::port [find_available_port [expr {$::port+1}]]
     dict set config port $::port
