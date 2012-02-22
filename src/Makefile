@@ -53,6 +53,13 @@ ifeq ($(MALLOC),jemalloc)
   DEPENDENCY_TARGETS+= jemalloc
 endif
 
+# XXX Darwin specific
+ifeq ($(CQL),yes)
+  CCLINK+=../deps/yaz/src/.libs/libyaz.dylib
+  CFLAGS+=-DUSE_CQL -I../deps/yaz/include
+  DEPENDENCY_TARGETS+= yaz
+endif
+
 CCLINK+= $(ALLOC_LINK)
 CFLAGS+= $(ALLOC_FLAGS)
 CCOPT= $(CFLAGS) $(ARCH) $(PROF)

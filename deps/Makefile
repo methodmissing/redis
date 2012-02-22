@@ -38,6 +38,7 @@ distclean:
 	-(cd linenoise && $(MAKE) clean) > /dev/null || true
 	-(cd lua && $(MAKE) clean) > /dev/null || true
 	-(cd jemalloc && [ -f Makefile ] && $(MAKE) distclean) > /dev/null || true
+	-(cd yaz && [ -f Makefile ] && $(MAKE) distclean) > /dev/null || true
 	-(rm -f .make-arch)
 
 hiredis: .make-arch
@@ -55,5 +56,9 @@ lua: .make-arch
 jemalloc: .make-arch
 	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)jemalloc$(ENDCOLOR)
 	cd jemalloc && ./configure $(JEMALLOC_CFLAGS) --with-jemalloc-prefix=je_ --enable-cc-silence && $(MAKE) lib/libjemalloc.a
+
+yaz: .make-arch
+	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)yaz$(ENDCOLOR)
+	cd yaz && ./configure --without-docbook-dtd --without-docbook-dsssl --without-docbook-xsl --without-openssl --without-gnutls --without-iconv --without-xml2 --without-xslt --without-exslt --without-icu && $(MAKE)
 
 .PHONY: default conditional_clean hiredis linenoise lua jemalloc
