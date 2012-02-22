@@ -1060,6 +1060,9 @@ void initServer() {
         server.db[j].expires = dictCreate(&keyptrDictType,NULL);
         server.db[j].blocking_keys = dictCreate(&keylistDictType,NULL);
         server.db[j].watched_keys = dictCreate(&keylistDictType,NULL);
+#ifdef USE_CQL
+        server.db[j].filters = dictCreate(&keylistDictType,NULL);
+#endif
         server.db[j].id = j;
     }
     server.pubsub_channels = dictCreate(&keylistDictType,NULL);
@@ -1109,6 +1112,14 @@ void initServer() {
         server.maxmemory = 3584LL*(1024*1024); /* 3584 MB = 3.5 GB */
         server.maxmemory_policy = REDIS_MAXMEMORY_NO_EVICTION;
     }
+
+#ifdef USE_CQL
+    server.parser = cql_parser_create();
+    if (server.parser == NULL) {
+        redisLog(REDIS_WARNING, "Could not instantiate the CQL parser");
+        exit(1);
+    }
+#endif
 
     if (server.cluster_enabled) clusterInit();
     scriptingInit();
@@ -1390,6 +1401,11 @@ int prepareForShutdown(int flags) {
         unlink(server.unixsocket); /* don't care if this fails */
     }
 
+#ifdef USE_CQL
+    if (server.parser)
+        cql_parser_destroy(server.parser);
+#endif
+
     redisLog(REDIS_WARNING,"Redis is now ready to exit, bye bye...");
     return REDIS_OK;
 }
@@ -1489,6 +1505,10 @@ sds genRedisInfoString(char *section) {
             uptime,
             uptime/(3600*24),
             (unsigned long) server.lruclock);
+#ifdef USE_CQL
+            info = sdscatprintf(info, "cql_enabled:%d\r\n",
+                   server.parser != NULL);
+#endif
     }
 
     /* Clients */

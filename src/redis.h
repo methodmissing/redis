@@ -34,6 +34,10 @@
 #include "version.h" /* Version macro */
 #include "util.h"    /* Misc functions useful in many places */
 
+#ifdef USE_CQL
+#include "yaz/cql.h"
+#endif
+
 /* Error codes */
 #define REDIS_OK                0
 #define REDIS_ERR               -1
@@ -284,6 +288,9 @@ typedef struct redisDb {
     dict *expires;              /* Timeout of keys with a timeout set */
     dict *blocking_keys;        /* Keys with clients waiting for data (BLPOP) */
     dict *watched_keys;         /* WATCHED keys for MULTI/EXEC CAS */
+#ifdef USE_CQL
+    dict *filters;              /* CQL filters for stream processing on updates */
+#endif
     int id;
 } redisDb;
 
@@ -676,6 +683,9 @@ struct redisServer {
     char *assert_file;
     int assert_line;
     int bug_report_start; /* True if bug report header was already logged. */
+#ifdef USE_CQL
+    CQL_parser parser;
+#endif
 };
 
 typedef struct pubsubPattern {
