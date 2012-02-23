@@ -628,6 +628,18 @@ struct commandHelp {
     "Get the score associated with the given member in a sorted set",
     4,
     "1.1" },
+#ifdef USE_CQL
+    { "FILTERS",
+    "CQL filters",
+    "Lists a mapping of data channels => CQL filters for stream parsing",
+    0,
+    "2.9.3" },
+    { "FILTER",
+    "register CQL filter",
+    "Register a data channel => CQL filter mapping for stream parsing",
+    0,
+    "2.9.3" },
+#endif
     { "ZUNIONSTORE",
     "destination numkeys key [key ...] [WEIGHTS weight] [AGGREGATE SUM|MIN|MAX]",
     "Add multiple sorted sets and store the resulting sorted set in a new key",

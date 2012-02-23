@@ -442,6 +442,47 @@ void moveCommand(redisClient *c) {
 }
 
 /*-----------------------------------------------------------------------------
+ * CQL Filter commands
+ *----------------------------------------------------------------------------*/
+
+#ifdef USE_CQL
+void filterCommand(redisClient *c) {
+    robj *channel, *cql;
+    channel = c->argv[1];
+    cql = c->argv[2];
+    dictEntry *de = dictFind(c->db->filters,channel);
+    if (de) {
+        dictReplace(c->db->filters, channel, cql);
+    } else {
+        int retval = dictAdd(c->db->filters, channel, cql);
+        redisAssertWithInfo(c,channel,retval == REDIS_OK);
+    }
+    incrRefCount(channel);
+    incrRefCount(cql);
+    addReply(c, shared.ok);
+}
+
+void filtersCommand(redisClient *c) {
+    dictIterator *di;
+    dictEntry *de;
+    int count = 0;
+    void *replylen = addDeferredMultiBulkLength(c);
+    di = dictGetIterator(c->db->filters);
+    while((de = dictNext(di)) != NULL) {
+        robj *keyobj, *valobj;
+        keyobj = dictGetKey(de);
+        valobj = dictGetVal(de);
+        addReplyBulk(c,keyobj);
+        count++;
+        addReplyBulk(c,valobj);
+        count++;
+    }
+    dictReleaseIterator(di);
+    setDeferredMultiBulkLength(c,replylen,count);
+}
+#endif
+
+/*-----------------------------------------------------------------------------
  * Expires API
  *----------------------------------------------------------------------------*/
 

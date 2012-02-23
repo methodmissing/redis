@@ -242,6 +242,10 @@ struct redisCommand redisCommandTable[] = {
     {"eval",evalCommand,-3,"wms",0,zunionInterGetKeys,0,0,0,0,0},
     {"evalsha",evalShaCommand,-3,"wms",0,zunionInterGetKeys,0,0,0,0,0},
     {"slowlog",slowlogCommand,-2,"r",0,NULL,0,0,0,0,0},
+#ifdef USE_CQL
+    {"filter",filterCommand,3,"wm",0,noPreloadGetKeys,1,1,1,0,0},
+    {"filters",filtersCommand,-1,"r",0,NULL,0,0,0,0,0},
+#endif
     {"script",scriptCommand,-2,"ras",0,NULL,0,0,0,0,0}
 };
 
@@ -1061,7 +1065,7 @@ void initServer() {
         server.db[j].blocking_keys = dictCreate(&keylistDictType,NULL);
         server.db[j].watched_keys = dictCreate(&keylistDictType,NULL);
 #ifdef USE_CQL
-        server.db[j].filters = dictCreate(&keylistDictType,NULL);
+        server.db[j].filters = dictCreate(&hashDictType,NULL);
 #endif
         server.db[j].id = j;
     }
