@@ -450,6 +450,12 @@ void filterCommand(redisClient *c) {
     robj *channel, *cql;
     channel = c->argv[1];
     cql = c->argv[2];
+    int pret;
+    pret = cql_parser_string(server.parser, cql->ptr);
+    if (pret != 0) {
+       addReplyErrorFormat(c,"invalid CQL query string: %s", cql_strerror(pret));
+       return;
+    }
     dictEntry *de = dictFind(c->db->filters,channel);
     if (de) {
         dictReplace(c->db->filters, channel, cql);
